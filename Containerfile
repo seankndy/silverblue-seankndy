@@ -26,21 +26,17 @@ COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
 # Build and sign the Nvidia kmod against this image's kernel
 RUN --mount=type=secret,id=akmods_privkey \
     cp /run/secrets/akmods_privkey /etc/pki/akmods/private/private_key.priv && \
+    chown akmods:akmods /etc/pki/akmods/private/private_key.priv && \
     chmod 600 /etc/pki/akmods/private/private_key.priv && \
     KVER=$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}') && \
     dnf install -y kernel-devel-${KVER} gcc make && \
     akmods --force --kernels "${KVER}" || true; \
     if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
       echo "=== KMOD NOT BUILT — DUMPING DIAGNOSTICS ===" ; \
-      echo "--- Contents of /var/cache/akmods/nvidia/ ---" ; \
       ls -la /var/cache/akmods/nvidia/ || true ; \
-      echo "--- Failed logs ---" ; \
       for f in /var/cache/akmods/nvidia/*.failed.log; do \
-        echo "=== $f ===" ; \
-        cat "$f" || true ; \
+        echo "=== $f ===" ; cat "$f" || true ; \
       done ; \
-      echo "--- Any other logs ---" ; \
-      find /var/cache/akmods -name '*.log' -exec sh -c 'echo "=== {} ==="; cat {}' \; ; \
       exit 1 ; \
     fi && \
     rm -f /etc/pki/akmods/private/private_key.priv
