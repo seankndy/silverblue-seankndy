@@ -29,11 +29,20 @@ RUN --mount=type=secret,id=akmods_privkey \
     chmod 600 /etc/pki/akmods/private/private_key.priv && \
     KVER=$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}') && \
     dnf install -y kernel-devel-${KVER} gcc make && \
-    (akmods --force --kernels "${KVER}" || \
-       (echo "=== AKMODS FAILED, DUMPING LOG ===" && \
-        cat /var/cache/akmods/nvidia/*.failed.log && \
-        exit 1)) && \
-    test -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz && \
+    akmods --force --kernels "${KVER}" || true; \
+    if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
+      echo "=== KMOD NOT BUILT — DUMPING DIAGNOSTICS ===" ; \
+      echo "--- Contents of /var/cache/akmods/nvidia/ ---" ; \
+      ls -la /var/cache/akmods/nvidia/ || true ; \
+      echo "--- Failed logs ---" ; \
+      for f in /var/cache/akmods/nvidia/*.failed.log; do \
+        echo "=== $f ===" ; \
+        cat "$f" || true ; \
+      done ; \
+      echo "--- Any other logs ---" ; \
+      find /var/cache/akmods -name '*.log' -exec sh -c 'echo "=== {} ==="; cat {}' \; ; \
+      exit 1 ; \
+    fi && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
