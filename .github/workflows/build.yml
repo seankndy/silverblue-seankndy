@@ -1,0 +1,54 @@
+name: build
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # nightly at 06:00 UTC
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: silverblue-seankndy
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode signing key
+        run: echo "${{ secrets.AKMODS_PRIVKEY }}" | base64 -d > /tmp/akmods_privkey
+
+      - name: Build image
+        id: build
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          tags: latest ${{ github.sha }}
+          containerfiles: ./Containerfile
+          oci: true
+          extra-args: |
+            --secret=id=akmods_privkey,src=/tmp/akmods_privkey
+
+      - name: Login to GHCR
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build.outputs.image }}
+          tags: ${{ steps.build.outputs.tags }}
+          registry: ${{ env.REGISTRY }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/akmods_privkey
