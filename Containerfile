@@ -43,17 +43,19 @@ RUN --mount=type=secret,id=akmods_privkey \
     chmod 600 /etc/pki/akmods/private/private_key.priv && \
     KVER=$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}') && \
     dnf install -y kernel-devel-${KVER} gcc make && \
-    akmods --force --kernels "${KVER}" || true; \
-    if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
-      echo "=== KMOD NOT BUILT ===" ; \
+    if ! akmods --force --kernels "${KVER}"; then \
+      echo "=== AKMODS FAILED ===" ; \
       ls -la /var/cache/akmods/nvidia/ ; \
       for f in /var/cache/akmods/nvidia/*.failed.log; do \
         echo "=== $f ===" ; cat "$f" ; \
       done ; \
       exit 1 ; \
     fi && \
-    dracut --force --no-hostonly --reproducible --kver "${KVER}" \
-    /lib/modules/${KVER}/initramfs.img && \
+    if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
+      echo "=== KMOD MISSING DESPITE NO ERROR ===" && exit 1 ; \
+    fi && \
+    dracut --force --no-hostonly --reproducible \
+      --kver "${KVER}" /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
