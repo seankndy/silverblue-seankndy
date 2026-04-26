@@ -19,9 +19,22 @@ RUN dnf install -y \
       xorg-x11-drv-nvidia-cuda \
       tailscale
 
+# Blacklist nouveau and set Nvidia module options
+RUN cat > /etc/modprobe.d/nvidia.conf <<EOF
+blacklist nouveau
+options nouveau modeset=0
+options nvidia-drm modeset=1 fbdev=1
+options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp
+EOF
+
+# Bake nvidia modules into initramfs, exclude nouveau from initramfs
+RUN cat > /etc/dracut.conf.d/nvidia.conf <<EOF
+add_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "
+omit_drivers+=" nouveau "
+EOF
+
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
-
 
 # Build and sign the Nvidia kmod against this image's kernel
 RUN --mount=type=secret,id=akmods_privkey \
