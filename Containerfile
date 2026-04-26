@@ -19,24 +19,25 @@ RUN dnf install -y \
       xorg-x11-drv-nvidia-cuda \
       tailscale
 
-# Blacklist nouveau and set Nvidia module options
+# Nvidia config — note these go in /usr/lib/modprobe.d/, not /etc/modprobe.d/,
+# so dracut/initramfs picks them up at early boot
 RUN printf '%s\n' \
     'blacklist nouveau' \
     'options nouveau modeset=0' \
     'options nvidia-drm modeset=1 fbdev=1' \
     'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' \
-    > /etc/modprobe.d/nvidia.conf
+    > /usr/lib/modprobe.d/nvidia.conf
 
-# Bake nvidia modules into initramfs (rebuild happens below), exclude nouveau from initramfs
 RUN printf '%s\n' \
-    'add_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "' \
+    'force_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "' \
     'omit_drivers+=" nouveau "' \
-    > /etc/dracut.conf.d/nvidia.conf
+    'hostonly="no"' \
+    > /usr/lib/dracut/dracut.conf.d/99-nvidia.conf
 
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
 
-# Build and sign the Nvidia kmod against this image's kernel
+# Build and sign the Nvidia kmod, then regenerate the initramfs
 RUN --mount=type=secret,id=akmods_privkey \
     cp /run/secrets/akmods_privkey /etc/pki/akmods/private/private_key.priv && \
     chown akmods:akmods /etc/pki/akmods/private/private_key.priv && \
@@ -54,9 +55,14 @@ RUN --mount=type=secret,id=akmods_privkey \
     if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
       echo "=== KMOD MISSING DESPITE NO ERROR ===" && exit 1 ; \
     fi && \
-    dracut --force --no-hostonly --reproducible \
+    rpm-ostree cliwrap install-to-root / && \
+    /usr/libexec/rpm-ostree/wrapped/dracut \
+      --no-hostonly \
+      --reproducible \
       --add ostree \
-      --kver "${KVER}" /lib/modules/${KVER}/initramfs.img && \
+      --kver "${KVER}" \
+      --force \
+      /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
