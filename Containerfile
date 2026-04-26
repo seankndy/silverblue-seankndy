@@ -13,9 +13,7 @@ RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
 RUN rpm-ostree install -y \
       tailscale \
       akmod-nvidia \
-      xorg-x11-drv-nvidia-cuda \
-      nvidia-vaapi-driver \
-      libva-utils
+      xorg-x11-drv-nvidia-cuda
 
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
