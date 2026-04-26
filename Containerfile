@@ -52,7 +52,8 @@ RUN --mount=type=secret,id=akmods_privkey \
       done ; \
       exit 1 ; \
     fi && \
-    dracut --force --kver "${KVER}" /lib/modules/${KVER}/initramfs.img && \
+    dracut --force --no-hostonly --reproducible --kver "${KVER}" \
+    /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
