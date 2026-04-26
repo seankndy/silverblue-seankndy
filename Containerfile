@@ -28,12 +28,6 @@ RUN printf '%s\n' \
     'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' \
     > /usr/lib/modprobe.d/nvidia.conf
 
-# Bake kernel args into the image so they auto-apply on deploy
-RUN mkdir -p /usr/lib/bootc/kargs.d && \
-    printf '%s\n' \
-      'kargs = ["rd.driver.blacklist=nouveau", "modprobe.blacklist=nouveau", "nvidia-drm.modeset=1"]' \
-      > /usr/lib/bootc/kargs.d/10-nvidia.toml
-
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
 

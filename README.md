@@ -141,13 +141,7 @@ If the private key is lost, the public key in MOK on existing machines is now us
 
    This downloads the image and stages it as the next deployment.
 
-3. **Reboot** into the new image:
-
-   ```bash
-   systemctl reboot
-   ```
-
-4. **Enroll the MOK key**. Get `mok.der` onto the machine (USB stick, scp, downloaded from this repo — the public key is fine to fetch over plain HTTP):
+3. **Enroll the MOK key**. Get `mok.der` onto the machine (USB stick, scp, downloaded from this repo — the public key is fine to fetch over plain HTTP):
 
    ```bash
    sudo mokutil --import mok.der
@@ -155,7 +149,22 @@ If the private key is lost, the public key in MOK on existing machines is now us
 
    Set a one-time password when prompted, then reboot. Complete the MOK Manager dance (see "How MOK signing works" above).
 
-5. **Verify everything works** after the second reboot:
+4. **Disable nouveau in kargs**. So that nvidia is the driver that wins.
+
+   ```bash
+   sudo rpm-ostree kargs \
+     --append=rd.driver.blacklist=nouveau \
+     --append=modprobe.blacklist=nouveau \
+     --append=nvidia-drm.modeset=1
+   ```
+
+5. **Reboot** into the new image:
+
+   ```bash
+   systemctl reboot
+   ```
+
+6. **Verify everything works** after the second reboot:
 
    ```bash
    mokutil --sb-state                              # SecureBoot enabled
@@ -165,7 +174,7 @@ If the private key is lost, the public key in MOK on existing machines is now us
    modinfo nvidia | grep -i license                # Dual MIT/GPL = open driver
    ```
 
-6. **Set up Tailscale** (one-time per machine):
+7. **Set up Tailscale** (one-time per machine):
 
    ```bash
    sudo tailscale up
@@ -173,7 +182,7 @@ If the private key is lost, the public key in MOK on existing machines is now us
 
    Follow the auth URL, approve the machine, done.
 
-7. **Set the hostname** (Silverblue installer doesn't prompt for it):
+8. **Set the hostname** (Silverblue installer doesn't prompt for it):
 
    ```bash
    sudo hostnamectl set-hostname <name>
