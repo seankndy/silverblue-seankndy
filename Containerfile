@@ -11,16 +11,17 @@ RUN dnf install -y \
 RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
       https://pkgs.tailscale.com/stable/fedora/tailscale.repo
 
-# Install Nvidia first
-RUN dnf install -y \
-      akmod-nvidia \
-      xorg-x11-drv-nvidia-cuda
+# akmod-nvidia: skip scriptlets to avoid the auto-build
+RUN dnf install -y --setopt=tsflags=noscripts akmod-nvidia
 
-# Then tailscale separately
-RUN dnf install -y tailscale
+# Everything else: scriptlets enabled
+RUN dnf install -y \
+      xorg-x11-drv-nvidia-cuda \
+      tailscale
 
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
+
 
 # Build and sign the Nvidia kmod against this image's kernel
 RUN --mount=type=secret,id=akmods_privkey \
