@@ -1,5 +1,7 @@
 FROM quay.io/fedora/fedora-silverblue:44
 
+ENV SYSTEMD_OFFLINE=1
+
 # RPMFusion (needed for Nvidia)
 RUN dnf install -y \
       https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \

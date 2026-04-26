@@ -33,6 +33,8 @@ jobs:
           containerfiles: ./Containerfile
           oci: true
           extra-args: |
+            --cap-add=AUDIT_WRITE
+            --cap-add=SYS_ADMIN
             --secret=id=akmods_privkey,src=/tmp/akmods_privkey
 
       - name: Login to GHCR
