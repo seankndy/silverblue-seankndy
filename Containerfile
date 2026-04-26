@@ -28,8 +28,11 @@ RUN --mount=type=secret,id=akmods_privkey \
     cp /run/secrets/akmods_privkey /etc/pki/akmods/private/private_key.priv && \
     chmod 600 /etc/pki/akmods/private/private_key.priv && \
     KVER=$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}') && \
-    dnf install -y kernel-devel-${KVER} && \
-    akmods --force --kernels "${KVER}" && \
+    dnf install -y kernel-devel-${KVER} gcc make && \
+    (akmods --force --kernels "${KVER}" || \
+       (echo "=== AKMODS FAILED, DUMPING LOG ===" && \
+        cat /var/cache/akmods/nvidia/*.failed.log && \
+        exit 1)) && \
     test -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
