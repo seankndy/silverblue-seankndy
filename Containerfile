@@ -28,16 +28,16 @@ RUN printf '%s\n' \
     'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' \
     > /usr/lib/modprobe.d/nvidia.conf
 
-RUN printf '%s\n' \
-    'force_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "' \
-    'omit_drivers+=" nouveau "' \
-    'hostonly="no"' \
-    > /usr/lib/dracut/dracut.conf.d/99-nvidia.conf
+# Bake kernel args into the image so they auto-apply on deploy
+RUN mkdir -p /usr/lib/bootc/kargs.d && \
+    printf '%s\n' \
+      'kargs = ["rd.driver.blacklist=nouveau", "modprobe.blacklist=nouveau", "nvidia-drm.modeset=1"]' \
+      > /usr/lib/bootc/kargs.d/10-nvidia.toml
 
 # Install your MOK public key so akmods will sign with the matching private key
 COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
 
-# Build and sign the Nvidia kmod, then regenerate the initramfs
+# Build and sign the Nvidia kmod
 RUN --mount=type=secret,id=akmods_privkey \
     cp /run/secrets/akmods_privkey /etc/pki/akmods/private/private_key.priv && \
     chown akmods:akmods /etc/pki/akmods/private/private_key.priv && \
@@ -55,14 +55,6 @@ RUN --mount=type=secret,id=akmods_privkey \
     if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
       echo "=== KMOD MISSING DESPITE NO ERROR ===" && exit 1 ; \
     fi && \
-    rpm-ostree cliwrap install-to-root / && \
-    /usr/libexec/rpm-ostree/wrapped/dracut \
-      --no-hostonly \
-      --reproducible \
-      --add ostree \
-      --kver "${KVER}" \
-      --force \
-      /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
