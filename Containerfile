@@ -55,6 +55,7 @@ RUN --mount=type=secret,id=akmods_privkey \
       echo "=== KMOD MISSING DESPITE NO ERROR ===" && exit 1 ; \
     fi && \
     dracut --force --no-hostonly --reproducible \
+      --add ostree \
       --kver "${KVER}" /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
