@@ -27,7 +27,7 @@ RUN printf '%s\n' \
     'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' \
     > /etc/modprobe.d/nvidia.conf
 
-# Bake nvidia modules into initramfs, exclude nouveau from initramfs
+# Bake nvidia modules into initramfs (rebuild happens below), exclude nouveau from initramfs
 RUN printf '%s\n' \
     'add_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "' \
     'omit_drivers+=" nouveau "' \
@@ -45,13 +45,14 @@ RUN --mount=type=secret,id=akmods_privkey \
     dnf install -y kernel-devel-${KVER} gcc make && \
     akmods --force --kernels "${KVER}" || true; \
     if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
-      echo "=== KMOD NOT BUILT — DUMPING DIAGNOSTICS ===" ; \
-      ls -la /var/cache/akmods/nvidia/ || true ; \
+      echo "=== KMOD NOT BUILT ===" ; \
+      ls -la /var/cache/akmods/nvidia/ ; \
       for f in /var/cache/akmods/nvidia/*.failed.log; do \
-        echo "=== $f ===" ; cat "$f" || true ; \
+        echo "=== $f ===" ; cat "$f" ; \
       done ; \
       exit 1 ; \
     fi && \
+    dracut --force --kver "${KVER}" /lib/modules/${KVER}/initramfs.img && \
     rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
