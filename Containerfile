@@ -12,7 +12,7 @@ RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
       https://pkgs.tailscale.com/stable/fedora/tailscale.repo
 
 # akmod-nvidia: skip scriptlets to avoid the auto-build
-RUN dnf install -y --setopt=tsflags=noscripts akmod-nvidia
+RUN dnf install -y --setopt=tsflags=noscripts akmod-nvidia-open
 
 # Everything else: scriptlets enabled
 RUN dnf install -y \
