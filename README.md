@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (open kernel modules, signed with a personal MOK key), nouveau blacklist, modprobe and dracut configs needed to make Nvidia + Wayland behave, GNOME Tweaks, plus a few networking utilities (`telnet`, `traceroute`).
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (open kernel modules, signed with a personal MOK key), modprobe options needed to make Nvidia + Wayland behave (nouveau itself is blocked via kargs on each machine — see below), GNOME Tweaks, plus a few networking utilities (`telnet`, `traceroute`).
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
 - The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
@@ -68,15 +68,13 @@ Roughly, in order:
 4. Drop in the Tailscale repo file.
 5. Install `akmod-nvidia` with `--setopt=tsflags=noscripts` (this prevents the auto-build scriptlet from running, which would fail in a build container because akmods refuses to run as root).
 6. Install other userspace bits (`xorg-x11-drv-nvidia-cuda`, `tailscale`).
-7. Write `/etc/modprobe.d/nvidia.conf` to blacklist nouveau and set Nvidia module options.
-8. Write `/etc/dracut.conf.d/nvidia.conf` to bake Nvidia modules into the initramfs and exclude nouveau.
-9. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
-10. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
-11. Enable `tailscaled.service`.
-12. `dnf clean all` to keep the image small.
-13. `ostree container commit` to finalize.
+7. Write `/usr/lib/modprobe.d/nvidia.conf` with Nvidia module options (`/usr/lib/modprobe.d/` rather than `/etc/modprobe.d/` because `/etc` is per-machine on OSTree). Nouveau is blocked at the karg level on each machine; the modprobe entries here are belt-and-suspenders only.
+8. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
+9. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
+10. Enable `tailscaled.service`.
+11. `ostree container commit` to finalize.
 
-Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch.
+Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch. The flip side is that `dnf clean all` has to run **inside the same `RUN`** as each install (otherwise the cache lives forever in the lower layer, and cleaning it in a later layer doesn't shrink the image).
 
 ---
 
@@ -374,7 +372,7 @@ sudo dmesg | grep -iE 'nvidia|nouveau'   # The truth
 mokutil --list-enrolled | grep CN        # Your key is enrolled
 ```
 
-If nouveau is loaded, the blacklist or dracut config didn't take effect. Verify they're in the deployed image (`cat /etc/modprobe.d/nvidia.conf` and `cat /etc/dracut.conf.d/nvidia.conf`).
+If nouveau is loaded, the kargs didn't take effect. Check `rpm-ostree kargs` for `rd.driver.blacklist=nouveau` and `modprobe.blacklist=nouveau`, and verify the modprobe options shipped in the image (`cat /usr/lib/modprobe.d/nvidia.conf`).
 
 If `dmesg` shows "Loading of unsigned module is rejected" or signature errors, the MOK enrollment didn't complete or the kmod was signed with a different key than the one enrolled.
 
