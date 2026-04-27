@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (open kernel modules, signed with a personal MOK key), nouveau blacklist, modprobe and dracut configs needed to make Nvidia + Wayland behave, plus a few networking utilities (`telnet`, `traceroute`).
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (open kernel modules, signed with a personal MOK key), nouveau blacklist, modprobe and dracut configs needed to make Nvidia + Wayland behave, GNOME Tweaks, plus a few networking utilities (`telnet`, `traceroute`).
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
 - The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
