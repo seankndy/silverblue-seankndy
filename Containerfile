@@ -22,6 +22,9 @@ RUN dnf install -y \
       traceroute \
       gnome-tweaks
 
+# Remove unwanted defaults
+RUN dnf remove -y firefox firefox-langpacks
+
 # Nvidia config — note these go in /usr/lib/modprobe.d/, not /etc/modprobe.d/,
 # so dracut/initramfs picks them up at early boot
 RUN printf '%s\n' \
