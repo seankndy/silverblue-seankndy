@@ -17,7 +17,9 @@ RUN dnf install -y --setopt=tsflags=noscripts akmod-nvidia
 # Everything else: scriptlets enabled
 RUN dnf install -y \
       xorg-x11-drv-nvidia-cuda \
-      tailscale
+      tailscale \
+      telnet \
+      traceroute
 
 # Nvidia config — note these go in /usr/lib/modprobe.d/, not /etc/modprobe.d/,
 # so dracut/initramfs picks them up at early boot
