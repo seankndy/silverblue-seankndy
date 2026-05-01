@@ -19,13 +19,17 @@ RUN dnf install -y \
 RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
       https://pkgs.tailscale.com/stable/fedora/tailscale.repo
 
-# akmod-nvidia: skip scriptlets to avoid the auto-build
-RUN dnf install -y --setopt=tsflags=noscripts akmod-nvidia \
+# Nvidia driver stack: skip scriptlets to avoid the auto-build.
+# xorg-x11-drv-nvidia-cuda has to be in this same noscripts install — otherwise
+# pulling it in later upgrades akmod-nvidia in a transaction with scriptlets ON,
+# and the post scriptlet runs akmodsbuild as root and fails.
+RUN dnf install -y --setopt=tsflags=noscripts \
+      akmod-nvidia \
+      xorg-x11-drv-nvidia-cuda \
  && dnf clean all && rm -rf /var/cache/dnf
 
 # Everything else: scriptlets enabled
 RUN dnf install -y \
-      xorg-x11-drv-nvidia-cuda \
       tailscale \
       telnet \
       traceroute \
