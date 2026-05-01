@@ -32,8 +32,8 @@ RUN dnf install -y \
       gnome-tweaks \
  && dnf clean all && rm -rf /var/cache/dnf
 
-# Remove unwanted defaults
-RUN dnf remove -y firefox firefox-langpacks
+# Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
+RUN dnf remove -y firefox firefox-langpacks gnome-browser-connector
 
 # Nvidia module options — written to /usr/lib/modprobe.d/ (not /etc/modprobe.d/)
 # because /etc is per-machine on OSTree. Nouveau is blocked via kargs (see README),
