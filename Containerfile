@@ -34,6 +34,7 @@ RUN dnf install -y \
       telnet \
       traceroute \
       gnome-tweaks \
+      podman-compose \
  && dnf clean all && rm -rf /var/cache/dnf
 
 # Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
