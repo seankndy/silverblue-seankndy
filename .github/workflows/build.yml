@@ -21,15 +21,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Quay's CDN occasionally drops the base-image download mid-stream
+      # (unexpected EOF). Pre-pull it with retries so a transient hiccup
+      # doesn't fail the whole build; buildah then reuses it from local storage.
+      - name: Pull base image (retry on transient registry errors)
+        run: |
+          BASE=$(awk '/^FROM/ {print $2; exit}' Containerfile)
+          echo "Pulling $BASE"
+          for i in 1 2 3 4 5; do
+            podman pull "$BASE" && exit 0
+            echo "::warning::pull of $BASE failed (attempt $i/5), retrying in 15s"
+            sleep 15
+          done
+          echo "::error::pull of $BASE failed after 5 attempts"
+          exit 1
+
       - name: Build image
         id: build
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@v3
         with:
           image: ${{ env.IMAGE_NAME }}
           tags: latest ${{ github.sha }}
           containerfiles: ./Containerfile
           oci: true
           extra-args: |
+            --pull=missing
             --cap-add=AUDIT_WRITE
 
       - name: Login to GHCR
