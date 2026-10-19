@@ -9,26 +9,11 @@ ENV SYSTEMD_OFFLINE=1
 # To actually shrink the image, the cleanup has to happen in the SAME RUN as
 # the install. That's why every `dnf install` below ends with `&& dnf clean all`.
 
-# RPMFusion (needed for Nvidia)
-RUN dnf install -y \
-      https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
-      https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \
- && dnf clean all && rm -rf /var/cache/dnf
-
 # Tailscale repo
 RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
       https://pkgs.tailscale.com/stable/fedora/tailscale.repo
 
-# Nvidia driver stack: skip scriptlets to avoid the auto-build.
-# xorg-x11-drv-nvidia-cuda has to be in this same noscripts install — otherwise
-# pulling it in later upgrades akmod-nvidia in a transaction with scriptlets ON,
-# and the post scriptlet runs akmodsbuild as root and fails.
-RUN dnf install -y --setopt=tsflags=noscripts \
-      akmod-nvidia \
-      xorg-x11-drv-nvidia-cuda \
- && dnf clean all && rm -rf /var/cache/dnf
-
-# Everything else: scriptlets enabled
+# Packages: scriptlets enabled
 RUN dnf install -y \
       tailscale \
       telnet \
@@ -39,40 +24,6 @@ RUN dnf install -y \
 
 # Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
 RUN dnf remove -y firefox firefox-langpacks gnome-browser-connector
-
-# Nvidia module options — written to /usr/lib/modprobe.d/ (not /etc/modprobe.d/)
-# because /etc is per-machine on OSTree. Nouveau is blocked via kargs (see README),
-# so the nouveau entries here are belt-and-suspenders only.
-RUN printf '%s\n' \
-    'blacklist nouveau' \
-    'options nouveau modeset=0' \
-    'options nvidia-drm modeset=1 fbdev=1' \
-    'options nvidia NVreg_PreserveVideoMemoryAllocations=1 NVreg_TemporaryFilePath=/var/tmp' \
-    > /usr/lib/modprobe.d/nvidia.conf
-
-# Install your MOK public key so akmods will sign with the matching private key
-COPY cert/mok.der /etc/pki/akmods/certs/public_key.der
-
-# Build and sign the Nvidia kmod
-RUN --mount=type=secret,id=akmods_privkey \
-    cp /run/secrets/akmods_privkey /etc/pki/akmods/private/private_key.priv && \
-    chown akmods:akmods /etc/pki/akmods/private/private_key.priv && \
-    chmod 600 /etc/pki/akmods/private/private_key.priv && \
-    KVER=$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}') && \
-    dnf install -y kernel-devel-${KVER} gcc make && \
-    dnf clean all && rm -rf /var/cache/dnf && \
-    if ! akmods --force --kernels "${KVER}"; then \
-      echo "=== AKMODS FAILED ===" ; \
-      ls -la /var/cache/akmods/nvidia/ ; \
-      for f in /var/cache/akmods/nvidia/*.failed.log; do \
-        echo "=== $f ===" ; cat "$f" ; \
-      done ; \
-      exit 1 ; \
-    fi && \
-    if [ ! -e /usr/lib/modules/${KVER}/extra/nvidia/nvidia.ko.xz ]; then \
-      echo "=== KMOD MISSING DESPITE NO ERROR ===" && exit 1 ; \
-    fi && \
-    rm -f /etc/pki/akmods/private/private_key.priv
 
 # Enable Tailscale at boot
 RUN systemctl enable tailscaled.service
