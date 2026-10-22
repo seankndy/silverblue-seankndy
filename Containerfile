@@ -9,13 +9,15 @@ ENV SYSTEMD_OFFLINE=1
 # To actually shrink the image, the cleanup has to happen in the SAME RUN as
 # the install. That's why every `dnf install` below ends with `&& dnf clean all`.
 
-# Tailscale repo
-RUN curl -Lo /etc/yum.repos.d/tailscale.repo \
-      https://pkgs.tailscale.com/stable/fedora/tailscale.repo
+# Static files: third-party repo files (disabled), docker group fix-up,
+# forwarding sysctl, iptable_nat module
+COPY files/ /
 
-# Packages: scriptlets enabled
-RUN dnf install -y \
+# Packages: scriptlets enabled. Third-party repos are enabled for this
+# command only; the running system never consults them.
+RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
       tailscale \
+      code \
       telnet \
       traceroute \
       gnome-tweaks \
@@ -28,9 +30,6 @@ RUN dnf install -y \
 
 # Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
 RUN dnf remove -y firefox firefox-langpacks gnome-browser-connector
-
-# Static files: docker group fix-up, forwarding sysctl, iptable_nat module
-COPY files/ /
 
 # Enable services at boot. docker.socket (not docker.service) starts the
 # daemon on first use instead of every boot.

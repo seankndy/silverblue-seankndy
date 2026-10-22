@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox (used as a Flatpak instead).
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox (used as a Flatpak instead).
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push) and publishes to `ghcr.io/<username>/<repo>`.
 
 This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo). Graphics are driven by the in-kernel `amdgpu` driver, so there are no out-of-tree kernel modules to build or sign — nothing like the Nvidia/akmods/MOK dance that an Nvidia box would need.
@@ -25,6 +25,8 @@ This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo)
 .
 ├── Containerfile                # The image definition
 ├── files/                       # Static files copied into the image root (COPY files/ /)
+│   ├── etc/yum.repos.d/tailscale.repo                 # Tailscale repo (disabled by default)
+│   ├── etc/yum.repos.d/vscode.repo                    # VS Code repo (disabled by default)
 │   ├── usr/libexec/docker-group-setup                 # Makes the docker group usable (see below)
 │   ├── usr/lib/systemd/system/docker-group-setup.service
 │   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
@@ -64,12 +66,13 @@ Roughly, in order:
 
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
-3. Drop in the Tailscale repo file.
-4. Install userspace bits (`tailscale`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`).
+3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load).
+4. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
 5. Remove unwanted defaults (`firefox`, `firefox-langpacks`, `gnome-browser-connector`).
-6. `COPY files/ /` — static files (docker group fix-up, sysctl, modules-load).
-7. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-8. `ostree container commit` to finalize.
+6. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
+7. `ostree container commit` to finalize.
+
+Third-party repo files (`tailscale.repo`, `vscode.repo`) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
 
 Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch. The flip side is that `dnf clean all` has to run **inside the same `RUN`** as each install (otherwise the cache lives forever in the lower layer, and cleaning it in a later layer doesn't shrink the image).
 
