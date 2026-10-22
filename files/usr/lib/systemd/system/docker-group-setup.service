@@ -1,0 +1,11 @@
+[Unit]
+Description=Make docker group manageable and add wheel users to it
+After=local-fs.target systemd-sysusers.service
+Before=systemd-user-sessions.service docker.socket
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/docker-group-setup
+
+[Install]
+WantedBy=multi-user.target

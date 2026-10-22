@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, GNOME Tweaks, `podman-compose`, plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox (used as a Flatpak instead).
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox (used as a Flatpak instead).
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push) and publishes to `ghcr.io/<username>/<repo>`.
 
 This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo). Graphics are driven by the in-kernel `amdgpu` driver, so there are no out-of-tree kernel modules to build or sign — nothing like the Nvidia/akmods/MOK dance that an Nvidia box would need.
@@ -24,6 +24,11 @@ This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo)
 ```
 .
 ├── Containerfile                # The image definition
+├── files/                       # Static files copied into the image root (COPY files/ /)
+│   ├── usr/libexec/docker-group-setup                 # Makes the docker group usable (see below)
+│   ├── usr/lib/systemd/system/docker-group-setup.service
+│   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
+│   └── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
 ├── .github/
 │   └── workflows/
 │       └── build.yml            # Nightly + on-push build pipeline
@@ -57,13 +62,14 @@ Fedora pushes updates to `quay.io/fedora/fedora-silverblue:<version>` continuous
 
 Roughly, in order:
 
-1. `FROM quay.io/fedora/fedora-silverblue:44` — start from stock Fedora.
+1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
 3. Drop in the Tailscale repo file.
-4. Install userspace bits (`tailscale`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`).
+4. Install userspace bits (`tailscale`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`).
 5. Remove unwanted defaults (`firefox`, `firefox-langpacks`, `gnome-browser-connector`).
-6. Enable `tailscaled.service`.
-7. `ostree container commit` to finalize.
+6. `COPY files/ /` — static files (docker group fix-up, sysctl, modules-load).
+7. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
+8. `ostree container commit` to finalize.
 
 Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch. The flip side is that `dnf clean all` has to run **inside the same `RUN`** as each install (otherwise the cache lives forever in the lower layer, and cleaning it in a later layer doesn't shrink the image).
 
@@ -143,6 +149,14 @@ sudo systemctl reboot
 ```
 
 That puts you back on stock Fedora's published ostree branch. You can rebase back to the custom image any time.
+
+### Docker
+
+Docker (Fedora's `moby-engine` build, with `docker compose` and `docker buildx`) and Podman are both installed and fully independent — separate daemons, separate image storage (`/var/lib/docker` vs `containers/storage`). Distrobox and Toolbx keep using Podman.
+
+- **Socket-activated**: `docker.socket` is enabled, not `docker.service`, so `dockerd` starts on first use rather than every boot. Containers with `restart: always`/`unless-stopped` therefore won't come back after a reboot until something touches Docker. If you need that, `sudo systemctl enable docker.service` on the machine.
+- **The `docker` group**: on image-based Fedora, RPM-created groups live in `/usr/lib/group`, which `usermod` can't edit, so `usermod -aG docker` normally fails with "group 'docker' does not exist". `docker-group-setup.service` copies the entry (resolved via `getent`, so the GID is preserved) into `/etc/group` on every boot (idempotent; moby-engine's `sysusers.d` entry guarantees the group exists at all), and the first time it runs, adds all `wheel` members to it. Membership in `docker` is root-equivalent; wheel users already have sudo, so this grants nothing new. To add another user later: `sudo usermod -aG docker <user>` and log out/in.
+- **IP forwarding**: `net.ipv4.ip_forward=1` is set at boot via sysctl. If `dockerd` has to enable forwarding itself, it also sets the iptables `FORWARD` policy to `DROP`, which can break forwarding for Podman and Tailscale.
 
 ---
 

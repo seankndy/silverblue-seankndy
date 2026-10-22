@@ -20,13 +20,24 @@ RUN dnf install -y \
       traceroute \
       gnome-tweaks \
       podman-compose \
+      distrobox \
+      moby-engine \
+      docker-compose \
+      docker-buildx \
  && dnf clean all && rm -rf /var/cache/dnf
 
 # Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
 RUN dnf remove -y firefox firefox-langpacks gnome-browser-connector
 
-# Enable Tailscale at boot
-RUN systemctl enable tailscaled.service
+# Static files: docker group fix-up, forwarding sysctl, iptable_nat module
+COPY files/ /
+
+# Enable services at boot. docker.socket (not docker.service) starts the
+# daemon on first use instead of every boot.
+RUN systemctl enable \
+      tailscaled.service \
+      docker.socket \
+      docker-group-setup.service
 
 # Finalize the OSTree commit
 RUN ostree container commit

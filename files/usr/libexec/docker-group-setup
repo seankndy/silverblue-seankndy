@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+# On image-based Fedora, groups created by RPM scriptlets live in
+# /usr/lib/group (resolved via nss-altfiles), but usermod/gpasswd only edit
+# /etc/group. Copy the docker entry into /etc so membership can be managed,
+# then add wheel members to it once.
+#
+# Note: `groupadd` can't be used here — it sees the existing group through
+# NSS and refuses. Copying the NSS entry keeps the GID. Resolving via getent
+# (not grepping /usr/lib/group) works wherever the entry ended up; moby-engine's
+# sysusers.d entry guarantees it exists somewhere.
+
+set -euo pipefail
+
+if ! grep -q '^docker:' /etc/group; then
+    getent group docker >> /etc/group
+fi
+if ! grep -q '^docker:' /etc/gshadow; then
+    echo 'docker:!::' >> /etc/gshadow
+fi
+
+# One-time: wheel users already have sudo, so docker group (root-equivalent)
+# grants nothing new. Stamped so users who later leave the group stay out.
+STAMP=/var/lib/docker-group-setup/wheel-added
+if [[ ! -e $STAMP ]]; then
+    IFS=, read -ra users <<< "$(getent group wheel | cut -d: -f4)"
+    for u in "${users[@]}"; do
+        usermod -aG docker "$u"
+    done
+    mkdir -p "${STAMP%/*}"
+    touch "$STAMP"
+fi
