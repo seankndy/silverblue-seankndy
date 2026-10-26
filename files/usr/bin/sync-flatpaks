@@ -1,0 +1,93 @@
+#!/usr/bin/bash
+# Bring system Flatpaks in line with this image: Flathub as the only remote,
+# and the apps listed in preinstall.d installed (see flatpak-preinstall(1)).
+#
+#   sync-flatpaks          apply (re-runs itself under sudo)
+#   sync-flatpaks --check  exit 0 if anything is pending, 1 if in sync.
+#                          Reads local files only: no root, no network.
+#
+# Remotes and installed apps live in /var, which the image build can't
+# touch on an existing install, hence a command rather than a build step.
+
+set -euo pipefail
+shopt -s nullglob
+
+FLATPAK_CONFIG=/var/lib/flatpak/repo/config
+FLATHUB_URL=https://dl.flathub.org/repo/flathub.flatpakrepo
+PREINSTALL_FILES=(/usr/share/flatpak/preinstall.d/*.preinstall /etc/flatpak/preinstall.d/*.preinstall)
+
+has_remote() {
+    grep -qxF "[remote \"$1\"]" "$FLATPAK_CONFIG" 2>/dev/null
+}
+
+remote_disabled() {
+    awk -v s="[remote \"$1\"]" '
+        $0 == s { f = 1; next }
+        /^\[/   { f = 0 }
+        f && $0 == "xa.disable=true" { found = 1 }
+        END { exit !found }
+    ' "$FLATPAK_CONFIG" 2>/dev/null
+}
+
+# Refs flatpak has installed via preinstall (or adopted), one per line
+preinstalled_refs() {
+    sed -n 's/^xa\.preinstalled=//p' "$FLATPAK_CONFIG" 2>/dev/null | tr ';' '\n'
+}
+
+# Refs the preinstall files ask for, as app/<id>/<arch>/<branch>.
+# Only handles what our file uses: apps, Branch= (default master).
+wanted_refs() {
+    (( ${#PREINSTALL_FILES[@]} )) || return 0
+    awk -v arch="$(uname -m)" '
+        function flush() { if (id != "") print "app/" id "/" arch "/" branch }
+        /^\[Flatpak Preinstall .+\]$/ {
+            flush(); id = substr($0, 21, length($0) - 21); branch = "master"; next
+        }
+        /^Branch=/ { branch = substr($0, 8) }
+        END { flush() }
+    ' "${PREINSTALL_FILES[@]}"
+}
+
+pending() {
+    has_remote flathub || return 0
+    remote_disabled flathub && return 0
+    has_remote fedora && return 0
+    has_remote fedora-testing && return 0
+
+    local wanted done ref
+    wanted=";$(wanted_refs | paste -sd ';');"
+    done=";$(preinstalled_refs | paste -sd ';');"
+
+    # Listed but never installed
+    while read -r ref; do
+        [[ $done == *";$ref;"* ]] || return 0
+    done < <(wanted_refs)
+
+    # Dropped from the list but still installed
+    while read -r ref; do
+        [[ -n $ref && $wanted != *";$ref;"* && -d /var/lib/flatpak/$ref ]] && return 0
+    done < <(preinstalled_refs)
+
+    return 1
+}
+
+if [[ ${1:-} == --check ]]; then
+    pending
+    exit
+fi
+
+if (( EUID != 0 )); then
+    exec sudo "$0" "$@"
+fi
+
+flatpak remote-add --system --if-not-exists flathub "$FLATHUB_URL"
+flatpak remote-modify --system --enable flathub
+
+# Fails (and stops here) if any app is still installed from Fedora's remote
+for remote in fedora fedora-testing; do
+    if has_remote "$remote"; then
+        flatpak remote-delete --system "$remote"
+    fi
+done
+
+flatpak preinstall --system -y

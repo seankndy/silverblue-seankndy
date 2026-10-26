@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox (used as a Flatpak instead).
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (Firefox and 1Password among them) that `sync-flatpaks` installs.
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push) and publishes to `ghcr.io/<username>/<repo>`.
 
 This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo). Graphics are driven by the in-kernel `amdgpu` driver, so there are no out-of-tree kernel modules to build or sign — nothing like the Nvidia/akmods/MOK dance that an Nvidia box would need.
@@ -30,7 +30,10 @@ This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo)
 │   ├── usr/libexec/docker-group-setup                 # Makes the docker group usable (see below)
 │   ├── usr/lib/systemd/system/docker-group-setup.service
 │   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
-│   └── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
+│   ├── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
+│   ├── usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall  # Flatpak app list
+│   ├── usr/bin/sync-flatpaks                          # Applies Flathub-only + the app list
+│   └── etc/profile.d/sync-flatpaks.sh                 # Terminal reminder when a sync is pending
 ├── .github/
 │   └── workflows/
 │       └── build.yml            # Nightly + on-push build pipeline
@@ -66,11 +69,12 @@ Roughly, in order:
 
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
-3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load).
+3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load, Flatpak list and `sync-flatpaks`).
 4. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
 5. Remove unwanted defaults (`firefox`, `firefox-langpacks`, `gnome-browser-connector`).
 6. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-7. `ostree container commit` to finalize.
+7. Disable `flatpak-add-fedora-repos.service` (Flathub only).
+8. `ostree container commit` to finalize.
 
 Third-party repo files (`tailscale.repo`, `vscode.repo`) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
 
@@ -108,6 +112,12 @@ Each step is intentionally a separate `RUN` so that buildah's layer cache works 
 
    ```bash
    sudo hostnamectl set-hostname <name>
+   ```
+
+6. **Install the Flatpak apps** (open a terminal; it will remind you):
+
+   ```bash
+   sync-flatpaks
    ```
 
 After this the machine is fully set up. Future updates flow automatically — `rpm-ostree` checks for new image versions and stages them; reboot to apply.
@@ -160,6 +170,22 @@ Docker (Fedora's `moby-engine` build, with `docker compose` and `docker buildx`)
 - **Socket-activated**: `docker.socket` is enabled, not `docker.service`, so `dockerd` starts on first use rather than every boot. Containers with `restart: always`/`unless-stopped` therefore won't come back after a reboot until something touches Docker. If you need that, `sudo systemctl enable docker.service` on the machine.
 - **The `docker` group**: on image-based Fedora, RPM-created groups live in `/usr/lib/group`, which `usermod` can't edit, so `usermod -aG docker` normally fails with "group 'docker' does not exist". `docker-group-setup.service` copies the entry (resolved via `getent`, so the GID is preserved) into `/etc/group` on every boot (idempotent; moby-engine's `sysusers.d` entry guarantees the group exists at all), and the first time it runs, adds all `wheel` members to it. Membership in `docker` is root-equivalent; wheel users already have sudo, so this grants nothing new. To add another user later: `sudo usermod -aG docker <user>` and log out/in.
 - **IP forwarding**: `net.ipv4.ip_forward=1` is set at boot via sysctl. If `dockerd` has to enable forwarding itself, it also sets the iptables `FORWARD` policy to `DROP`, which can break forwarding for Podman and Tailscale.
+
+### Flatpaks
+
+Flatpak apps aren't part of the image itself (they live in `/var`), so the image ships the *list* and a command to apply it:
+
+- **The list**: `files/usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall`, in Flatpak's own [preinstall format](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-preinstall). Every Flathub entry needs `Branch=stable`.
+- **`sync-flatpaks`**: adds/enables Flathub, removes Fedora's Flatpak remote, then runs `flatpak preinstall -y`, which installs anything listed and not yet installed, and uninstalls anything it previously installed that's since been dropped from the list. Re-runs itself under `sudo`.
+- **The reminder**: `/etc/profile.d/sync-flatpaks.sh` runs `sync-flatpaks --check` in each new (bash) terminal and prints a one-line nudge when something's pending. It only reads local files — no network, no root.
+
+Flatpak tracks what it has preinstalled (`xa.preinstalled` in `/var/lib/flatpak/repo/config`), so:
+
+- An app you uninstall yourself is **not** reinstalled, and doesn't trigger the reminder.
+- Re-adding an app you previously uninstalled won't bring it back; `flatpak install flathub <id>` it manually.
+- Apps update the normal Flatpak way (GNOME Software, or `flatpak update`), not via the image.
+
+**1Password as a Flatpak** has limits (per 1Password): no system-auth (fingerprint/password) unlock, no SSH agent, and the browser extension can't lock/unlock with the app. The extension works standalone. The 1Password CLI isn't installed.
 
 ---
 

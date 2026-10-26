@@ -10,7 +10,7 @@ ENV SYSTEMD_OFFLINE=1
 # the install. That's why every `dnf install` below ends with `&& dnf clean all`.
 
 # Static files: third-party repo files (disabled), docker group fix-up,
-# forwarding sysctl, iptable_nat module
+# forwarding sysctl, iptable_nat module, Flatpak list + sync-flatpaks
 COPY files/ /
 
 # Packages: scriptlets enabled. Third-party repos are enabled for this
@@ -37,6 +37,10 @@ RUN systemctl enable \
       tailscaled.service \
       docker.socket \
       docker-group-setup.service
+
+# Flathub only: don't add Fedora's Flatpak remote on first boot. Existing
+# remotes and the preinstall list are applied by `sync-flatpaks`.
+RUN systemctl disable flatpak-add-fedora-repos.service
 
 # Finalize the OSTree commit
 RUN ostree container commit

@@ -1,0 +1,99 @@
+# System Flatpaks for this image, installed from Flathub by `sync-flatpaks`.
+# Removing an entry here uninstalls the app on the next sync; apps you
+# uninstall yourself are not reinstalled. Format: flatpak-preinstall(1).
+
+# 1Password
+[Flatpak Preinstall com.onepassword.OnePassword]
+Branch=stable
+
+# Cartero
+[Flatpak Preinstall es.danirod.Cartero]
+Branch=stable
+
+# Discord
+[Flatpak Preinstall com.discordapp.Discord]
+Branch=stable
+
+# DistroShelf
+[Flatpak Preinstall com.ranfdev.DistroShelf]
+Branch=stable
+
+# EasyEffects
+[Flatpak Preinstall com.github.wwmm.easyeffects]
+Branch=stable
+
+# Eyedropper
+[Flatpak Preinstall com.github.finefindus.eyedropper]
+Branch=stable
+
+# Firefox
+[Flatpak Preinstall org.mozilla.firefox]
+Branch=stable
+
+# Flatseal
+[Flatpak Preinstall com.github.tchx84.Flatseal]
+Branch=stable
+
+# Fragments
+[Flatpak Preinstall de.haeckerfelix.Fragments]
+Branch=stable
+
+# GIMP
+[Flatpak Preinstall org.gimp.GIMP]
+Branch=stable
+
+# Google Chrome
+[Flatpak Preinstall com.google.Chrome]
+Branch=stable
+
+# Impression
+[Flatpak Preinstall io.gitlab.adhami3310.Impression]
+Branch=stable
+
+# LibreOffice
+[Flatpak Preinstall org.libreoffice.LibreOffice]
+Branch=stable
+
+# LocalSend
+[Flatpak Preinstall org.localsend.localsend_app]
+Branch=stable
+
+# OBS Studio
+[Flatpak Preinstall com.obsproject.Studio]
+Branch=stable
+
+# Proton Mail Bridge
+[Flatpak Preinstall ch.protonmail.protonmail-bridge]
+Branch=stable
+
+# Proton VPN
+[Flatpak Preinstall com.protonvpn.www]
+Branch=stable
+
+# Remmina
+[Flatpak Preinstall org.remmina.Remmina]
+Branch=stable
+
+# Spotify
+[Flatpak Preinstall com.spotify.Client]
+Branch=stable
+
+# Thunderbird
+[Flatpak Preinstall org.mozilla.thunderbird]
+Branch=stable
+
+# VLC
+[Flatpak Preinstall org.videolan.VLC]
+Branch=stable
+
+# Warehouse
+[Flatpak Preinstall io.github.flattool.Warehouse]
+Branch=stable
+
+# Wireshark
+[Flatpak Preinstall org.wireshark.Wireshark]
+Branch=stable
+
+# Zoom
+[Flatpak Preinstall us.zoom.Zoom]
+Branch=stable
