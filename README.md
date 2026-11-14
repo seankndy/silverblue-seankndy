@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, keeps Fedora's Flatpak remote and its preinstalled apps, adds Flathub, and ships a list of Flathub apps (1Password among them) that `sync-flatpaks` installs.
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), the ChatGPT and Grok Bot desktop apps (official RPMs), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, keeps Fedora's Flatpak remote and its preinstalled apps, adds Flathub, and ships a list of Flathub apps (1Password among them) that `sync-flatpaks` installs.
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
 - The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
@@ -30,6 +30,10 @@ The matching private key (`mok.priv`) is **not** in the repo. It lives in 1Passw
 ├── files/                       # Static files copied into the image root (COPY files/ /)
 │   ├── etc/yum.repos.d/tailscale.repo                 # Tailscale repo (disabled by default)
 │   ├── etc/yum.repos.d/vscode.repo                    # VS Code repo (disabled by default)
+│   ├── etc/yum.repos.d/chatgpt.repo                   # ChatGPT repo (disabled by default)
+│   ├── etc/yum.repos.d/grok-bot.repo                  # Grok Bot repo (disabled by default)
+│   ├── etc/pki/rpm-gpg/                               # Signing keys for the ChatGPT and Grok Bot repos
+│   ├── usr/lib/tmpfiles.d/grok-bot.conf               # Links "/opt/Grok Bot" to /usr/lib/grok-bot
 │   ├── usr/libexec/docker-group-setup                 # Makes the docker group usable (see below)
 │   ├── usr/lib/systemd/system/docker-group-setup.service
 │   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
@@ -75,18 +79,19 @@ Roughly, in order:
 
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
-3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load, Nvidia modprobe options, Flatpak list and `sync-flatpaks`).
+3. `COPY files/ /` — static files (third-party repo files and signing keys, docker group fix-up, Grok Bot tmpfiles entry, sysctl, modules-load, Nvidia modprobe options, Flatpak list and `sync-flatpaks`).
 4. Install the RPMFusion free/nonfree release packages (needed for Nvidia), then flip their repos to `enabled=0`.
 5. Install `akmod-nvidia` and `xorg-x11-drv-nvidia-cuda` with `--setopt=tsflags=noscripts` (this prevents the auto-build scriptlet from running, which would fail in a build container because akmods refuses to run as root). Both must be in this same noscripts transaction, or a later install upgrades `akmod-nvidia` with scriptlets on.
-6. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
-7. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
-8. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
-9. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-10. `ostree container commit` to finalize.
+6. Install packages (`tailscale`, `code`, `chatgpt`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
+7. Install `grok-bot`. It installs to `/opt/Grok Bot`, but `/opt` is a symlink into `/var`, which an image can't ship, so the build installs into a temporary real `/opt`, moves the app to `/usr/lib/grok-bot`, and puts the symlink back; `tmpfiles.d/grok-bot.conf` links `/var/opt/Grok Bot` to it on the running system.
+8. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
+9. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
+10. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
+11. `ostree container commit` to finalize.
 
 The Nvidia module options live in `/usr/lib/modprobe.d/nvidia.conf` rather than `/etc/modprobe.d/` because `/etc` is per-machine on OSTree. Nouveau is blocked at the karg level on each machine; the modprobe entries are belt-and-suspenders only.
 
-Third-party repo files (`tailscale.repo`, `vscode.repo`, and RPMFusion's) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
+Third-party repo files (`tailscale.repo`, `vscode.repo`, `chatgpt.repo`, `grok-bot.repo`, and RPMFusion's) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale, VS Code, ChatGPT and Grok Bot update when the nightly image rebuilds: each build installs the newest version from those repos. Claude Desktop isn't included: Anthropic only publishes it for Debian/Ubuntu so far.
 
 Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch. The flip side is that `dnf clean all` has to run **inside the same `RUN`** as each install (otherwise the cache lives forever in the lower layer, and cleaning it in a later layer doesn't shrink the image).
 

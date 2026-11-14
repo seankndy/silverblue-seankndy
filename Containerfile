@@ -9,7 +9,7 @@ ENV SYSTEMD_OFFLINE=1
 # To actually shrink the image, the cleanup has to happen in the SAME RUN as
 # the install. That's why every `dnf install` below ends with `&& dnf clean all`.
 
-# Static files: third-party repo files (disabled), docker group fix-up,
+# Static files: third-party repo files (disabled) and keys, docker group fix-up,
 # forwarding sysctl, iptable_nat module, Nvidia modprobe options,
 # Flatpak list + sync-flatpaks
 COPY files/ /
@@ -37,8 +37,10 @@ RUN dnf install -y --setopt=tsflags=noscripts \
 # Packages: scriptlets enabled. Third-party repos are enabled for this
 # command only; the running system never consults them.
 RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
+      --enablerepo=openai-chatgpt \
       tailscale \
       code \
+      chatgpt \
       telnet \
       traceroute \
       chromium \
@@ -48,6 +50,21 @@ RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
       moby-engine \
       docker-compose \
       docker-buildx \
+ && rm -f /etc/yum.repos.d/chatgpt.repo.rpmnew \
+ && dnf clean all && rm -rf /var/cache/dnf
+
+# Grok Bot installs to "/opt/Grok Bot", but /opt is a symlink into /var,
+# which the image can't ship. Install into a real /opt, move the app into
+# /usr/lib/grok-bot, and restore the symlink; tmpfiles.d/grok-bot.conf
+# links the original path back on the running system. The package's
+# update-alternatives entry for /usr/bin/grok-bot is swapped for a plain
+# symlink, since the alternatives database lives in /var too.
+RUN rm /opt && mkdir /opt \
+ && dnf install -y --enablerepo=grok-bot grok-bot \
+ && update-alternatives --remove grok-bot "/opt/Grok Bot/grok-bot" \
+ && mv "/opt/Grok Bot" /usr/lib/grok-bot \
+ && rmdir /opt && ln -s var/opt /opt \
+ && ln -sf ../lib/grok-bot/grok-bot /usr/bin/grok-bot \
  && dnf clean all && rm -rf /var/cache/dnf
 
 # Install your MOK public key so akmods will sign with the matching private key

@@ -49,11 +49,6 @@ CollectionID=org.flathub.Stable
 Branch=stable
 CollectionID=org.flathub.Stable
 
-# Google Chrome
-[Flatpak Preinstall com.google.Chrome]
-Branch=stable
-CollectionID=org.flathub.Stable
-
 # Impression
 [Flatpak Preinstall io.gitlab.adhami3310.Impression]
 Branch=stable
