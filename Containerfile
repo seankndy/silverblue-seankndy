@@ -14,13 +14,14 @@ ENV SYSTEMD_OFFLINE=1
 # Flatpak list + sync-flatpaks
 COPY files/ /
 
-# RPMFusion (needed for Nvidia). The release RPMs ship the repos enabled;
+# RPMFusion (needed for Nvidia). The release RPMs ship the repos enabled
+# (in /usr/share/dnf5/repos.d/ as of F45, not /etc/yum.repos.d/);
 # disable them to match the other third-party repos, and enable them only
 # for the Nvidia install below.
 RUN dnf install -y \
       https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
       https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \
- && sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/rpmfusion-*.repo \
+ && sed -i 's/^enabled=1/enabled=0/' /usr/share/dnf5/repos.d/rpmfusion-*.repo \
  && dnf clean all && rm -rf /var/cache/dnf
 
 # Nvidia driver stack: skip scriptlets to avoid the auto-build.
