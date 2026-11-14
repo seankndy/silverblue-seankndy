@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It also removes the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (Firefox and 1Password among them) that `sync-flatpaks` installs.
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (1Password among them) that `sync-flatpaks` installs.
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push) and publishes to `ghcr.io/<username>/<repo>`.
 
 This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo). Graphics are driven by the in-kernel `amdgpu` driver, so there are no out-of-tree kernel modules to build or sign — nothing like the Nvidia/akmods/MOK dance that an Nvidia box would need.
@@ -70,11 +70,10 @@ Roughly, in order:
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
 3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load, Flatpak list and `sync-flatpaks`).
-4. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
-5. Remove unwanted defaults (`firefox`, `firefox-langpacks`, `gnome-browser-connector`).
-6. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-7. Disable `flatpak-add-fedora-repos.service` (Flathub only).
-8. `ostree container commit` to finalize.
+4. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
+5. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
+6. Disable `flatpak-add-fedora-repos.service` (Flathub only).
+7. `ostree container commit` to finalize.
 
 Third-party repo files (`tailscale.repo`, `vscode.repo`) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
 

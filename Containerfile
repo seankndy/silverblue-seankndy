@@ -20,6 +20,7 @@ RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
       code \
       telnet \
       traceroute \
+      chromium \
       gnome-tweaks \
       podman-compose \
       distrobox \
@@ -27,9 +28,6 @@ RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
       docker-compose \
       docker-buildx \
  && dnf clean all && rm -rf /var/cache/dnf
-
-# Remove unwanted defaults (gnome-browser-connector is not useful since firefox will be in a flatpak)
-RUN dnf remove -y firefox firefox-langpacks gnome-browser-connector
 
 # Enable services at boot. docker.socket (not docker.service) starts the
 # daemon on first use instead of every boot.

@@ -26,10 +26,6 @@ Branch=stable
 [Flatpak Preinstall com.github.finefindus.eyedropper]
 Branch=stable
 
-# Firefox
-[Flatpak Preinstall org.mozilla.firefox]
-Branch=stable
-
 # Flatseal
 [Flatpak Preinstall com.github.tchx84.Flatseal]
 Branch=stable
