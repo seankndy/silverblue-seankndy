@@ -1,6 +1,6 @@
 # Custom Fedora Silverblue Image
 
-A personal Fedora Silverblue OCI image with Tailscale and a few extras baked in, built nightly by GitHub Actions and published to GHCR.
+A personal Fedora Silverblue OCI image with Tailscale, Nvidia drivers and a few extras baked in, built nightly by GitHub Actions and published to GHCR.
 
 This README is for future-me (or anyone else picking this up cold) so the whole system can be understood and rebuilt without re-deriving everything from scratch.
 
@@ -12,10 +12,11 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (1Password among them) that `sync-flatpaks` installs.
-- A GitHub Actions workflow that rebuilds the image nightly (and on every push) and publishes to `ghcr.io/<username>/<repo>`.
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (1Password among them) that `sync-flatpaks` installs.
+- A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
+- The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
-This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo). Graphics are driven by the in-kernel `amdgpu` driver, so there are no out-of-tree kernel modules to build or sign — nothing like the Nvidia/akmods/MOK dance that an Nvidia box would need.
+The matching private key (`mok.priv`) is **not** in the repo. It lives in 1Password and is referenced by GitHub Actions via the `AKMODS_PRIVKEY` repository secret.
 
 ---
 
@@ -24,6 +25,8 @@ This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo)
 ```
 .
 ├── Containerfile                # The image definition
+├── cert/
+│   └── mok.der                  # Public half of the MOK signing key (committed, safe)
 ├── files/                       # Static files copied into the image root (COPY files/ /)
 │   ├── etc/yum.repos.d/tailscale.repo                 # Tailscale repo (disabled by default)
 │   ├── etc/yum.repos.d/vscode.repo                    # VS Code repo (disabled by default)
@@ -31,6 +34,7 @@ This image targets an AMD machine (Framework Desktop, Ryzen AI Max / Strix Halo)
 │   ├── usr/lib/systemd/system/docker-group-setup.service
 │   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
 │   ├── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
+│   ├── usr/lib/modprobe.d/nvidia.conf                 # Nvidia module options
 │   ├── usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall  # Flatpak app list
 │   ├── usr/bin/sync-flatpaks                          # Applies Flathub-only + the app list
 │   └── etc/profile.d/sync-flatpaks.sh                 # Terminal reminder when a sync is pending
@@ -53,9 +57,11 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) runs on three trigge
 When it runs, the workflow does this:
 
 1. Checks out the repo onto an Ubuntu runner.
-2. Builds the image using `buildah` against the Containerfile.
-3. Logs into GHCR using the auto-generated `GITHUB_TOKEN`.
-4. Pushes the image with two tags: `latest` and the git commit SHA.
+2. Decodes the MOK private key from the `AKMODS_PRIVKEY` secret into a temp file.
+3. Builds the image using `buildah` against the Containerfile, mounting the private key as a build-time secret (so it's used during akmods signing but never written into the final image).
+4. Logs into GHCR using the auto-generated `GITHUB_TOKEN`.
+5. Pushes the image with two tags: `latest` and the git commit SHA.
+6. Cleans up the temp key file.
 
 The image ends up at `ghcr.io/<username>/<repo>:latest`. The package needs to be set to **public visibility** in GitHub once after the first successful build (Profile → Packages → repo → Package settings → visibility) so that `rpm-ostree` can pull it without authentication.
 
@@ -69,15 +75,70 @@ Roughly, in order:
 
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
-3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load, Flatpak list and `sync-flatpaks`).
-4. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
-5. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-6. Disable `flatpak-add-fedora-repos.service` (Flathub only).
-7. `ostree container commit` to finalize.
+3. `COPY files/ /` — static files (Tailscale and VS Code repo files, docker group fix-up, sysctl, modules-load, Nvidia modprobe options, Flatpak list and `sync-flatpaks`).
+4. Install the RPMFusion free/nonfree release packages (needed for Nvidia), then flip their repos to `enabled=0`.
+5. Install `akmod-nvidia` and `xorg-x11-drv-nvidia-cuda` with `--setopt=tsflags=noscripts` (this prevents the auto-build scriptlet from running, which would fail in a build container because akmods refuses to run as root). Both must be in this same noscripts transaction, or a later install upgrades `akmod-nvidia` with scriptlets on.
+6. Install packages (`tailscale`, `code`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
+7. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
+8. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
+9. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
+10. Disable `flatpak-add-fedora-repos.service` (Flathub only).
+11. `ostree container commit` to finalize.
 
-Third-party repo files (`tailscale.repo`, `vscode.repo`) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
+The Nvidia module options live in `/usr/lib/modprobe.d/nvidia.conf` rather than `/etc/modprobe.d/` because `/etc` is per-machine on OSTree. Nouveau is blocked at the karg level on each machine; the modprobe entries are belt-and-suspenders only.
+
+Third-party repo files (`tailscale.repo`, `vscode.repo`, and RPMFusion's) ship with `enabled=0`. The build turns them on with `--enablerepo` just for the install, so the packages are baked into the image, but the running system never talks to those repos. That keeps `rpm-ostree install` (if you ever layer something locally) fast and limited to Fedora's repos. Tailscale and VS Code update when the nightly image rebuilds.
 
 Each step is intentionally a separate `RUN` so that buildah's layer cache works — small Containerfile changes don't force a full rebuild from scratch. The flip side is that `dnf clean all` has to run **inside the same `RUN`** as each install (otherwise the cache lives forever in the lower layer, and cleaning it in a later layer doesn't shrink the image).
+
+---
+
+## How MOK signing works
+
+Linux kernels with Secure Boot enabled refuse to load kernel modules unless they're signed by a key the kernel trusts. The Nvidia kernel module is out-of-tree (not shipped by Fedora), so it needs to be signed by *you* with a key that *you* enroll into the system's trust list.
+
+The trust list for user-added keys is called **MOK** (Machine Owner Key). It's stored in NVRAM on the motherboard, separate from your disk, and survives OS reinstalls. Shim (the bootloader) reads it at boot and passes it to the kernel as additional trusted signers beyond the firmware-level keys.
+
+### Generating the key (one-time, already done)
+
+```bash
+openssl req -new -x509 -newkey rsa:2048 \
+  -keyout mok.priv -outform DER -out mok.der \
+  -nodes -days 36500 \
+  -subj "/CN=seankndy MOK signing key/"
+```
+
+This produced two files:
+
+- `mok.priv` — private key, kept secret. **Stored in 1Password.** Also stored in GitHub as the `AKMODS_PRIVKEY` repository secret (base64-encoded).
+- `mok.der` — public key, committed to the repo at `cert/mok.der`.
+
+### How signing happens during build
+
+The Containerfile mounts the private key from the GitHub secret into the build at `/run/secrets/akmods_privkey`, copies it to `/etc/pki/akmods/private/private_key.priv`, chowns it to the `akmods` user, and runs `akmods --force`. Akmods compiles the Nvidia kernel module, sees the signing keys in `/etc/pki/akmods/`, and signs the result. Then the private key is deleted from the image so it doesn't end up baked into the published artifact.
+
+### How enrollment happens on a machine (one-time per machine)
+
+After installing Silverblue and rebasing to this image (see below), but before the first boot can use Nvidia properly, the public key has to be enrolled into MOK on that specific machine:
+
+```bash
+sudo mokutil --import /path/to/mok.der
+```
+
+It prompts for a one-time password — make something up, you only need it for the next 60 seconds. Reboot. At boot, the blue **MOK Manager** screen appears (looks like a retro BIOS menu). Choose:
+
+1. **Enroll MOK**
+2. **View key 0** (optional, just to verify it's the right key — should show `CN=seankndy MOK signing key`)
+3. **Continue**
+4. **Yes**
+5. Enter the one-time password
+6. **Reboot**
+
+After that, the kernel trusts modules signed by this key forever on this machine. Any future image rebuilds with new Nvidia kmods will continue to work without re-enrollment, because they're all signed with the same key.
+
+### Recovering / rotating the key
+
+If the private key is lost, the public key in MOK on existing machines is now useless and a new key has to be generated, the public half re-enrolled on every machine, and the private half put back into 1Password and GitHub secrets. So: don't lose `mok.priv`.
 
 ---
 
@@ -93,13 +154,39 @@ Each step is intentionally a separate `RUN` so that buildah's layer cache works 
 
    This downloads the image and stages it as the next deployment.
 
-3. **Reboot** into the new image:
+3. **Enroll the MOK key**. Get `mok.der` onto the machine (USB stick, scp, downloaded from this repo — the public key is fine to fetch over plain HTTP):
+
+   ```bash
+   sudo mokutil --import mok.der
+   ```
+
+   Set a one-time password when prompted. You'll complete the MOK Manager dance on the next reboot (see "How MOK signing works" above).
+
+4. **Disable nouveau in kargs**, so that nvidia is the driver that wins:
+
+   ```bash
+   sudo rpm-ostree kargs \
+     --append=rd.driver.blacklist=nouveau \
+     --append=modprobe.blacklist=nouveau \
+     --append=nvidia-drm.modeset=1
+   ```
+
+5. **Reboot** into the new image:
 
    ```bash
    systemctl reboot
    ```
 
-4. **Set up Tailscale** (one-time per machine):
+6. **Verify Nvidia** after the reboot:
+
+   ```bash
+   mokutil --sb-state                              # SecureBoot enabled
+   mokutil --list-enrolled | grep -i 'CN='         # Your key is listed
+   lsmod | grep nvidia                             # Modules loaded
+   nvidia-smi                                      # GPU shows up
+   ```
+
+7. **Set up Tailscale** (one-time per machine):
 
    ```bash
    sudo tailscale up
@@ -107,13 +194,13 @@ Each step is intentionally a separate `RUN` so that buildah's layer cache works 
 
    Follow the auth URL, approve the machine, done.
 
-5. **Set the hostname** (Silverblue installer doesn't prompt for it):
+8. **Set the hostname** (Silverblue installer doesn't prompt for it):
 
    ```bash
    sudo hostnamectl set-hostname <name>
    ```
 
-6. **Install the Flatpak apps** (open a terminal; it will remind you):
+9. **Install the Flatpak apps** (open a terminal; it will remind you):
 
    ```bash
    sync-flatpaks
@@ -200,7 +287,7 @@ The flow:
 
 1. **Fedora updates the base image.** Every few days/weeks, `quay.io/fedora/fedora-silverblue:44` gets a new build with whatever upstream has accumulated.
 
-2. **Your nightly Actions run pulls it in.** At 06:00 UTC each day, the workflow runs `FROM quay.io/fedora/fedora-silverblue:44`, which fetches whatever the current `:44` is. Your customizations (Tailscale, configs) get layered on top of the new base.
+2. **Your nightly Actions run pulls it in.** At 06:00 UTC each day, the workflow runs `FROM quay.io/fedora/fedora-silverblue:44`, which fetches whatever the current `:44` is. Your customizations (Tailscale, Nvidia, configs) get layered on top of the new base.
 
 3. **The result is published to GHCR.** Tagged `latest`, replacing the previous build. Old builds are still in GHCR's history (90 days retention by GitHub) if you ever need to dig back.
 
@@ -218,7 +305,12 @@ Fedora releases a new major version about every six months (typically late April
 
 The process is intentionally manual. You decide when to upgrade.
 
-**Step 1: Wait (optional).** There's no out-of-tree driver to worry about on this AMD box, so major upgrades are much lower-risk than they'd be on an Nvidia machine. Still, it's reasonable to let a new release settle for a week or two and skim [discussion.fedoraproject.org](https://discussion.fedoraproject.org/) for any Silverblue-specific pain before jumping.
+**Step 1: Wait.** Don't rush a major upgrade in the first 2–4 weeks after release. Specifically for this image, the Nvidia stack needs time to settle:
+   - RPMFusion has to rebuild `akmod-nvidia` against the new Fedora's kernel
+   - Sometimes the Nvidia driver itself needs an update to support the new kernel API
+   - The first few weeks after a Fedora release are when these mismatches show up
+
+   A reasonable rule: wait until the new release is at least a month old and Nvidia + your hardware combo has been working for other people. Check [discussion.fedoraproject.org](https://discussion.fedoraproject.org/) for current pain.
 
 **Step 2: Update the Containerfile.** Change the `FROM` line:
 
@@ -232,6 +324,7 @@ The process is intentionally manual. You decide when to upgrade.
    - Package names sometimes change (a package gets renamed or split in a new release)
    - Repo paths shift
    - Scriptlets in newer systemd or other base packages may behave differently
+   - RPMFusion may not have all packages built for the new release yet
 
    If the build fails, debug it the same way as any other failure. Look at the raw log, identify what's missing or broken, fix the Containerfile, push again.
 
@@ -248,7 +341,11 @@ The process is intentionally manual. You decide when to upgrade.
 
    ```bash
    cat /etc/os-release | grep VERSION_ID    # Should show 45
+   nvidia-smi                                # Nvidia still works
+   lsmod | grep nvidia                       # Modules loaded
    ```
+
+   The MOK enrollment carries over — you don't need to re-enroll the key on a major version upgrade. It's stored in NVRAM independent of any OS state.
 
 **Step 6: If something breaks, roll back.** Same as any update:
 
@@ -303,8 +400,29 @@ Check the failed workflow run, click into the `build` job, expand the failed ste
 
 Common failures and what they mean:
 
-- **"Packages not found: <name>"** — a package may have been renamed/split in a new Fedora release, or the repo isn't available yet. Either wait, drop the package, or pin to a previous Fedora version.
+- **"Packages not found: <name>"** — a package may have been renamed/split in a new Fedora release, or the repo (often RPMFusion) isn't available yet. Either wait, drop the package, or pin to a previous Fedora version.
+- **"akmods scriptlet failed: not to be used as root"** — the `--setopt=tsflags=noscripts` flag isn't on the akmod-nvidia install line, or something later in the build pulled in an Nvidia package with scriptlets on.
+- **akmods signing: "Permission denied"** — the private key isn't chowned to the `akmods` user before signing.
 - **Transaction failed during systemd %triggerin** — likely missing the `SYSTEMD_OFFLINE=1` env var or the `--cap-add=AUDIT_WRITE` buildah arg in the workflow.
+
+### Machine boots but Nvidia doesn't load
+
+Check in order:
+
+```bash
+lsmod | grep nouveau                     # Should be empty (blacklisted)
+lsmod | grep nvidia                      # Should show modules
+sudo dmesg | grep -iE 'nvidia|nouveau'   # The truth
+mokutil --list-enrolled | grep CN        # Your key is enrolled
+```
+
+If nouveau is loaded, the kargs didn't take effect. Check `rpm-ostree kargs` for `rd.driver.blacklist=nouveau` and `modprobe.blacklist=nouveau`, and verify the modprobe options shipped in the image (`cat /usr/lib/modprobe.d/nvidia.conf`).
+
+If `dmesg` shows "Loading of unsigned module is rejected" or signature errors, the MOK enrollment didn't complete or the kmod was signed with a different key than the one enrolled.
+
+### Flatpaks don't open but Firefox works
+
+Almost always Nvidia driver state — Flatpaks try to set up GPU acceleration and hang/fail when the driver isn't loaded properly. Same diagnostic as above.
 
 ### Need to debug from a non-graphical environment
 
@@ -316,4 +434,5 @@ Press `Ctrl+Alt+F3` to switch to a TTY. Log in with your normal user. From there
 
 - Fedora's bootc/ostree-native-container change proposal: https://fedoraproject.org/wiki/Changes/OstreeNativeContainerStable
 - bootc documentation: https://bootc-dev.github.io/bootc/
+- uBlue's akmods repo (good reference for how the pros do Nvidia): https://github.com/ublue-os/akmods
 - BlueBuild (a higher-level tool that wraps this whole pattern, in case you outgrow the bare Containerfile approach): https://blue-build.org/

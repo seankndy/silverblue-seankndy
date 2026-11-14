@@ -36,6 +36,9 @@ jobs:
           echo "::error::pull of $BASE failed after 5 attempts"
           exit 1
 
+      - name: Decode signing key
+        run: echo "${{ secrets.AKMODS_PRIVKEY }}" | base64 -d > /tmp/akmods_privkey
+
       - name: Build image
         id: build
         uses: redhat-actions/buildah-build@v3
@@ -47,6 +50,8 @@ jobs:
           extra-args: |
             --pull=missing
             --cap-add=AUDIT_WRITE
+            --cap-add=SYS_ADMIN
+            --secret=id=akmods_privkey,src=/tmp/akmods_privkey
 
       - name: Login to GHCR
         uses: redhat-actions/podman-login@v1
@@ -61,3 +66,7 @@ jobs:
           image: ${{ steps.build.outputs.image }}
           tags: ${{ steps.build.outputs.tags }}
           registry: ${{ env.REGISTRY }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/akmods_privkey
