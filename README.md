@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, makes Flathub the only Flatpak remote, and ships a list of Flatpak apps (1Password among them) that `sync-flatpaks` installs.
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, keeps Fedora's Flatpak remote and its preinstalled apps, adds Flathub, and ships a list of Flathub apps (1Password among them) that `sync-flatpaks` installs.
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
 - The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
@@ -36,7 +36,7 @@ The matching private key (`mok.priv`) is **not** in the repo. It lives in 1Passw
 │   ├── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
 │   ├── usr/lib/modprobe.d/nvidia.conf                 # Nvidia module options
 │   ├── usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall  # Flatpak app list
-│   ├── usr/bin/sync-flatpaks                          # Applies Flathub-only + the app list
+│   ├── usr/bin/sync-flatpaks                          # Adds Flathub + installs the app list
 │   └── etc/profile.d/sync-flatpaks.sh                 # Terminal reminder when a sync is pending
 ├── .github/
 │   └── workflows/
@@ -82,8 +82,7 @@ Roughly, in order:
 7. Copy the public MOK key to `/etc/pki/akmods/certs/public_key.der`.
 8. Mount the private key as a build secret, chown it to the `akmods` user (otherwise `sign-file` gets permission-denied), then run `akmods --force` to compile and sign the Nvidia kmod against the kernel in the image.
 9. Enable `tailscaled.service`, `docker.socket`, `docker-group-setup.service`.
-10. Disable `flatpak-add-fedora-repos.service` (Flathub only).
-11. `ostree container commit` to finalize.
+10. `ostree container commit` to finalize.
 
 The Nvidia module options live in `/usr/lib/modprobe.d/nvidia.conf` rather than `/etc/modprobe.d/` because `/etc` is per-machine on OSTree. Nouveau is blocked at the karg level on each machine; the modprobe entries are belt-and-suspenders only.
 
@@ -261,8 +260,8 @@ Docker (Fedora's `moby-engine` build, with `docker compose` and `docker buildx`)
 
 Flatpak apps aren't part of the image itself (they live in `/var`), so the image ships the *list* and a command to apply it:
 
-- **The list**: `files/usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall`, in Flatpak's own [preinstall format](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-preinstall). Every Flathub entry needs `Branch=stable`.
-- **`sync-flatpaks`**: adds/enables Flathub, removes Fedora's Flatpak remote, then runs `flatpak preinstall -y`, which installs anything listed and not yet installed, and uninstalls anything it previously installed that's since been dropped from the list. Re-runs itself under `sudo`.
+- **The list**: `files/usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall`, in Flatpak's own [preinstall format](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-preinstall). Every entry needs `Branch=stable` and `CollectionID=org.flathub.Stable`, so it installs from Flathub even when Fedora's remote has the same app.
+- **`sync-flatpaks`**: adds/enables Flathub (with its collection ID), makes sure Fedora's remote is present, then runs `flatpak preinstall -y`, which installs anything listed and not yet installed, and uninstalls anything it previously installed that's since been dropped from the list. Fedora's remote and the Fedora apps are never removed. Re-runs itself under `sudo`.
 - **The reminder**: `/etc/profile.d/sync-flatpaks.sh` runs `sync-flatpaks --check` in each new (bash) terminal and prints a one-line nudge when something's pending. It only reads local files — no network, no root.
 
 Flatpak tracks what it has preinstalled (`xa.preinstalled` in `/var/lib/flatpak/repo/config`), so:

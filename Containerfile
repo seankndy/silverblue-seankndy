@@ -82,9 +82,5 @@ RUN systemctl enable \
       docker.socket \
       docker-group-setup.service
 
-# Flathub only: don't add Fedora's Flatpak remote on first boot. Existing
-# remotes and the preinstall list are applied by `sync-flatpaks`.
-RUN systemctl disable flatpak-add-fedora-repos.service
-
 # Finalize the OSTree commit
 RUN ostree container commit

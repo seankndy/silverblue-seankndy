@@ -1,6 +1,7 @@
 #!/usr/bin/bash
-# Bring system Flatpaks in line with this image: Flathub as the only remote,
-# and the apps listed in preinstall.d installed (see flatpak-preinstall(1)).
+# Install this image's own Flatpak apps (listed in preinstall.d, see
+# flatpak-preinstall(1)) from Flathub, alongside Fedora's Flatpak remote and
+# the Fedora apps that came with the system. Fedora's apps are never touched.
 #
 #   sync-flatpaks          apply (re-runs itself under sudo)
 #   sync-flatpaks --check  exit 0 if anything is pending, 1 if in sync.
@@ -14,17 +15,19 @@ shopt -s nullglob
 
 FLATPAK_CONFIG=/var/lib/flatpak/repo/config
 FLATHUB_URL=https://dl.flathub.org/repo/flathub.flatpakrepo
+FLATHUB_COLLECTION=org.flathub.Stable
 PREINSTALL_FILES=(/usr/share/flatpak/preinstall.d/*.preinstall /etc/flatpak/preinstall.d/*.preinstall)
 
 has_remote() {
     grep -qxF "[remote \"$1\"]" "$FLATPAK_CONFIG" 2>/dev/null
 }
 
-remote_disabled() {
-    awk -v s="[remote \"$1\"]" '
+# remote_has <remote> <exact config line>
+remote_has() {
+    awk -v s="[remote \"$1\"]" -v want="$2" '
         $0 == s { f = 1; next }
         /^\[/   { f = 0 }
-        f && $0 == "xa.disable=true" { found = 1 }
+        f && $0 == want { found = 1 }
         END { exit !found }
     ' "$FLATPAK_CONFIG" 2>/dev/null
 }
@@ -50,9 +53,9 @@ wanted_refs() {
 
 pending() {
     has_remote flathub || return 0
-    remote_disabled flathub && return 0
-    has_remote fedora && return 0
-    has_remote fedora-testing && return 0
+    remote_has flathub "xa.disable=true" && return 0
+    remote_has flathub "collection-id=$FLATHUB_COLLECTION" || return 0
+    has_remote fedora || return 0
 
     local wanted done ref
     wanted=";$(wanted_refs | paste -sd ';');"
@@ -81,13 +84,15 @@ if (( EUID != 0 )); then
 fi
 
 flatpak remote-add --system --if-not-exists flathub "$FLATHUB_URL"
-flatpak remote-modify --system --enable flathub
+# The collection ID lets the list's CollectionID= lines pick Flathub over
+# Fedora's remote when both carry an app.
+flatpak remote-modify --system --enable --collection-id="$FLATHUB_COLLECTION" flathub
 
-# Fails (and stops here) if any app is still installed from Fedora's remote
-for remote in fedora fedora-testing; do
-    if has_remote "$remote"; then
-        flatpak remote-delete --system "$remote"
-    fi
-done
+# Same as Fedora's flatpak-add-fedora-repos.service; restores the remote
+# if it went missing. Never removed.
+flatpak remote-add --system --if-not-exists --title "Fedora Flatpaks" \
+    fedora oci+https://registry.fedoraproject.org
+flatpak remote-add --system --if-not-exists --disable --title "Fedora Flatpaks (testing)" \
+    fedora-testing oci+https://registry.fedoraproject.org#testing
 
 flatpak preinstall --system -y
