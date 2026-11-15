@@ -12,7 +12,7 @@ Fedora publishes Silverblue as an OCI container image at `quay.io/fedora/fedora-
 
 This repo is exactly that:
 
-- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), the ChatGPT and Grok Bot desktop apps (official RPMs), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM, keeps Fedora's Flatpak remote and its preinstalled apps, adds Flathub, and ships a list of Flathub apps (1Password among them) that `sync-flatpaks` installs.
+- A `Containerfile` that starts from stock Fedora Silverblue and adds: Tailscale, Nvidia drivers (akmod-built, signed with a personal MOK key, plus the modprobe options Nvidia + Wayland needs; nouveau itself is blocked via kargs on each machine, see below), VS Code (RPM, not Flatpak), the ChatGPT and Grok Bot desktop apps (official RPMs), Chromium, GNOME Tweaks, `podman-compose`, `distrobox`, Docker (Fedora's `moby-engine`, alongside Podman), plus a few networking utilities (`telnet`, `traceroute`). It keeps the stock Firefox RPM and Fedora's Flatpak remote and its preinstalled apps. Flathub apps aren't part of the image; they're installed by hand.
 - A GitHub Actions workflow that rebuilds the image nightly (and on every push), signs the Nvidia kmod during the build, and publishes to `ghcr.io/<username>/<repo>`.
 - The signing public key (`cert/mok.der`) needed to enroll on each machine that boots this image.
 
@@ -38,10 +38,7 @@ The matching private key (`mok.priv`) is **not** in the repo. It lives in 1Passw
 │   ├── usr/lib/systemd/system/docker-group-setup.service
 │   ├── usr/lib/sysctl.d/90-docker.conf                # net.ipv4.ip_forward=1 at boot
 │   ├── usr/lib/modules-load.d/docker.conf             # iptable_nat for docker-in-docker
-│   ├── usr/lib/modprobe.d/nvidia.conf                 # Nvidia module options
-│   ├── usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall  # Flatpak app list
-│   ├── usr/bin/sync-flatpaks                          # Adds Flathub + installs the app list
-│   └── etc/profile.d/sync-flatpaks.sh                 # Terminal reminder when a sync is pending
+│   └── usr/lib/modprobe.d/nvidia.conf                 # Nvidia module options
 ├── .github/
 │   └── workflows/
 │       └── build.yml            # Nightly + on-push build pipeline
@@ -79,7 +76,7 @@ Roughly, in order:
 
 1. `FROM quay.io/fedora/fedora-silverblue:45` — start from stock Fedora.
 2. Set `SYSTEMD_OFFLINE=1` so systemd scriptlets don't try to talk to a non-existent init system during build.
-3. `COPY files/ /` — static files (third-party repo files and signing keys, docker group fix-up, Grok Bot tmpfiles entry, sysctl, modules-load, Nvidia modprobe options, Flatpak list and `sync-flatpaks`).
+3. `COPY files/ /` — static files (third-party repo files and signing keys, docker group fix-up, Grok Bot tmpfiles entry, sysctl, modules-load, Nvidia modprobe options).
 4. Install the RPMFusion free/nonfree release packages (needed for Nvidia), then flip their repos to `enabled=0`.
 5. Install `akmod-nvidia` and `xorg-x11-drv-nvidia-cuda` with `--setopt=tsflags=noscripts` (this prevents the auto-build scriptlet from running, which would fail in a build container because akmods refuses to run as root). Both must be in this same noscripts transaction, or a later install upgrades `akmod-nvidia` with scriptlets on.
 6. Install packages (`tailscale`, `code`, `chatgpt`, `telnet`, `traceroute`, `chromium`, `gnome-tweaks`, `podman-compose`, `distrobox`, `moby-engine`, `docker-compose`, `docker-buildx`), with the third-party repos enabled for that one command only (see below).
@@ -204,11 +201,7 @@ If the private key is lost, the public key in MOK on existing machines is now us
    sudo hostnamectl set-hostname <name>
    ```
 
-9. **Install the Flatpak apps** (open a terminal; it will remind you):
-
-   ```bash
-   sync-flatpaks
-   ```
+9. **Install your Flatpak apps** from Flathub (see [Flatpaks](#flatpaks)).
 
 After this the machine is fully set up. Future updates flow automatically — `rpm-ostree` checks for new image versions and stages them; reboot to apply.
 
@@ -263,17 +256,13 @@ Docker (Fedora's `moby-engine` build, with `docker compose` and `docker buildx`)
 
 ### Flatpaks
 
-Flatpak apps aren't part of the image itself (they live in `/var`), so the image ships the *list* and a command to apply it:
+Flatpak apps aren't part of the image (they live in `/var`). Flatpak is left as stock Fedora sets it up: the `fedora` remote with its preinstalled apps, plus the system `flathub` remote that `fedora-third-party` adds when third-party repositories are enabled (Fedora's filter file is currently empty, so it's all of Flathub). Apps are installed system-wide, the same as GNOME Software does:
 
-- **The list**: `files/usr/share/flatpak/preinstall.d/silverblue-seankndy.preinstall`, in Flatpak's own [preinstall format](https://docs.flatpak.org/en/latest/flatpak-command-reference.html#flatpak-preinstall). Every entry needs `Branch=stable` and `CollectionID=org.flathub.Stable`, so it installs from Flathub even when Fedora's remote has the same app.
-- **`sync-flatpaks`**: adds/enables Flathub (with its collection ID), makes sure Fedora's remote is present, then runs `flatpak preinstall -y`, which installs anything listed and not yet installed, and uninstalls anything it previously installed that's since been dropped from the list. Fedora's remote and the Fedora apps are never removed. Re-runs itself under `sudo`.
-- **The reminder**: `/etc/profile.d/sync-flatpaks.sh` runs `sync-flatpaks --check` in each new (bash) terminal and prints a one-line nudge when something's pending. It only reads local files — no network, no root.
+```bash
+flatpak install flathub <app-id>
+```
 
-Flatpak tracks what it has preinstalled (`xa.preinstalled` in `/var/lib/flatpak/repo/config`), so:
-
-- An app you uninstall yourself is **not** reinstalled, and doesn't trigger the reminder.
-- Re-adding an app you previously uninstalled won't bring it back; `flatpak install flathub <id>` it manually.
-- Apps update the normal Flatpak way (GNOME Software, or `flatpak update`), not via the image.
+When the `fedora` remote also has an app, name `flathub` explicitly (or pick the Flathub source in GNOME Software) to get the Flathub build. Apps update the normal Flatpak way (GNOME Software, or `flatpak update`), not via the image.
 
 **1Password as a Flatpak** has limits (per 1Password): no system-auth (fingerprint/password) unlock, no SSH agent, and the browser extension can't lock/unlock with the app. The extension works standalone. The 1Password CLI isn't installed.
 

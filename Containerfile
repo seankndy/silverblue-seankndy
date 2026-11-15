@@ -10,8 +10,7 @@ ENV SYSTEMD_OFFLINE=1
 # the install. That's why every `dnf install` below ends with `&& dnf clean all`.
 
 # Static files: third-party repo files (disabled) and keys, docker group fix-up,
-# forwarding sysctl, iptable_nat module, Nvidia modprobe options,
-# Flatpak list + sync-flatpaks
+# forwarding sysctl, iptable_nat module, Nvidia modprobe options
 COPY files/ /
 
 # RPMFusion (needed for Nvidia). The release RPMs ship the repos enabled
