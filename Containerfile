@@ -52,6 +52,16 @@ RUN dnf install -y --enablerepo=tailscale-stable --enablerepo=code \
  && rm -f /etc/yum.repos.d/chatgpt.repo.rpmnew \
  && dnf clean all && rm -rf /var/cache/dnf
 
+# Needed for Superwhisper to work when it's installed by a user
+# (tux.superwhisper.com/install.sh, into ~/.local). Its installer and its
+# 6-hourly updater check for these and run `sudo dnf install` when they're
+# missing, which can't work on an image-based system.
+RUN dnf install -y \
+      gtk4-layer-shell \
+      minisign \
+      wtype \
+ && dnf clean all && rm -rf /var/cache/dnf
+
 # Grok Bot installs to "/opt/Grok Bot", but /opt is a symlink into /var,
 # which the image can't ship. Install into a real /opt, move the app into
 # /usr/lib/grok-bot, and restore the symlink; tmpfiles.d/grok-bot.conf
